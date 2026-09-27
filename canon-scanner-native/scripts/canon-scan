@@ -1,0 +1,104 @@
+#!/bin/bash
+# canon-scan —— Canon 一体机 loong64 原生扫描入口
+#
+# 这是对 SANE 官方 scanimage 的一层薄包装，只做三件事：
+#   1. 未指定设备时自动挑出 pixma 扫描仪
+#   2. 在终端里裸跑、又没给输出文件时，自动生成 ~/扫描/scan-<时间戳>.png
+#   3. 扫描失败时自动修复「扫描通道挂起」并重试（详见 canon-scan-fix -h）
+#
+# 其余参数原样透传给 scanimage。示例：
+#   canon-scan                                  # 默认 300dpi 彩色 -> ~/扫描/
+#   canon-scan --resolution 600 --mode Gray     # 600dpi 灰度
+#   canon-scan --format=jpeg -o /tmp/x.jpg      # 自定格式与输出
+#   canon-scan -L                               # 透传，列出设备
+#   canon-scan -A                               # 透传，列出全部可调项
+#
+# 环境变量：
+#   CANON_SCAN_DIR=目录      默认输出目录（默认 $HOME/扫描）
+#   CANON_SCAN_FIX=路径      修复工具路径（默认 canon-scan-fix）
+#   CANON_SCAN_RECOVER=0     关掉自动恢复
+#   CANON_SCAN_DEVICE=设备   强制指定设备，跳过自动探测
+
+set -u
+
+FIX="${CANON_SCAN_FIX:-/usr/bin/canon-scan-fix}"
+[ -x "$FIX" ] || FIX="canon-scan-fix"
+RECOVER="${CANON_SCAN_RECOVER:-1}"
+
+die() { echo "canon-scan: $*" >&2; exit 1; }
+
+# --- 探测设备 -------------------------------------------------------------
+detect_device() {
+    [ -n "${CANON_SCAN_DEVICE:-}" ] && { echo "$CANON_SCAN_DEVICE"; return; }
+    scanimage -L 2>/dev/null \
+        | sed -n "s/.*\`\(pixma:[^']*\)'.*/\1/p" \
+        | head -1
+}
+
+# --- 参数检查 -------------------------------------------------------------
+have_dev=0; have_out=0
+for a in "$@"; do
+    case "$a" in
+        -d|--device)      have_dev=1 ;;
+        --device=*)       have_dev=1 ;;
+        -o|--output-file) have_out=1 ;;
+        --output-file=*)  have_out=1 ;;
+        -L|--list-devices|-h|--help|-V|--version) exec scanimage "$@" ;;
+    esac
+done
+
+args=("$@")
+
+if [ $have_dev -eq 0 ]; then
+    dev=$(detect_device)
+    [ -n "$dev" ] || die "没找到 pixma 扫描仪。检查 USB 连接与电源，或运行 canon-scan-fix -R。"
+    args=(-d "$dev" "${args[@]}")
+    echo "canon-scan: 使用设备 $dev" >&2
+fi
+
+outfile=""
+if [ $have_out -eq 0 ] && [ -t 1 ]; then
+    outdir="${CANON_SCAN_DIR:-$HOME/扫描}"
+    mkdir -p "$outdir" || die "无法创建输出目录 $outdir"
+    outfile="$outdir/scan-$(date +%Y%m%d-%H%M%S).png"
+    args+=(--format=png -o "$outfile")
+fi
+
+# --- 执行 ---------------------------------------------------------------
+run() { scanimage "${args[@]}"; }
+
+cleanup_failed() {
+    [ -n "$outfile" ] && [ -f "$outfile" ] && [ ! -s "$outfile" ] && rm -f "$outfile"
+    return 0
+}
+
+run; rc=$?
+if [ $rc -eq 0 ]; then
+    [ -n "$outfile" ] && echo "canon-scan: 已保存 $outfile（$(stat -c%s "$outfile") 字节）" >&2
+    exit 0
+fi
+cleanup_failed
+
+if [ "$RECOVER" != "1" ]; then
+    die "扫描失败（exit=$rc），自动恢复已关闭。"
+fi
+
+echo "canon-scan: 扫描失败（exit=$rc），正在自动恢复扫描通道…" >&2
+"$FIX" >&2
+run; rc=$?
+if [ $rc -eq 0 ]; then
+    [ -n "$outfile" ] && echo "canon-scan: 已恢复并保存 $outfile（$(stat -c%s "$outfile") 字节）" >&2
+    exit 0
+fi
+cleanup_failed
+
+echo "canon-scan: 清端点无效，改用整机 USB 复位…" >&2
+"$FIX" -R >&2
+run; rc=$?
+if [ $rc -eq 0 ]; then
+    [ -n "$outfile" ] && echo "canon-scan: 已复位并保存 $outfile（$(stat -c%s "$outfile") 字节）" >&2
+    exit 0
+fi
+cleanup_failed
+
+die "扫描仍失败（exit=$rc）。请拔插扫描仪 USB 线（或断电重启设备）后再试。"

@@ -1,0 +1,25 @@
+# 构建中间物
+build/
+stage/
+dist/
+__pycache__/
+*.pyc
+*.o
+shots/
+*.pid
+
+# 编辑器临时文件
+*.kate-swp
+*.swp
+*~
+
+# 本机工作夹
+/tmp-work/
+
+# 构建产物 deb
+/packages/
+
+# 原厂材料（存放于 ~/文档/，不入库）
+scangearmp2_*.deb
+scangearmp2-*-deb.tar.gz
+scangearmp2-source-*.tar.gz

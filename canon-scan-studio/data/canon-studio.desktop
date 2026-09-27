@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Canon 扫描
+Name[en]=Canon Scan
+GenericName=扫描仪
+GenericName[en]=Scanner
+Comment=佳能 PIXMA 一体机的原生扫描界面（loong64 全原生，无指令翻译）
+Comment[en]=Native scanner front-end for Canon PIXMA (pure loong64)
+Exec=canon-studio
+TryExec=canon-studio
+Icon=canon-studio
+Terminal=false
+StartupNotify=true
+Categories=Graphics;Scanning;
+Keywords=scan;scanner;Canon;PIXMA;document;pdf;扫描;扫描仪;佳能;文档;

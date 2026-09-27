@@ -1,0 +1,60 @@
+#!/bin/bash
+# canon-studio —— 启动「Canon 扫描」：本地 Web 后端（Python 标准库，端口自动分配）
+#                + 原生桌面窗口（GTK3 + WebKit2，纯 loong64 原生）
+#
+# 环境变量：
+#   CANON_PORT=8899        固定端口（默认 0=自动分配）
+#   CANON_NO_SHELL=1       不开原生窗口，改用默认浏览器
+#   CANON_PYTHON=/usr/bin/python3
+#   CANON_DEVTOOLS=1       在窗口内启用 Web 检查器
+#   CANON_WEBKIT_NO_COMPOSITING=1   花屏/黑屏时降级渲染
+set -u
+
+APP_DIR="${CANON_STUDIO_DIR:-/usr/lib/canon-studio}"
+PY="${CANON_PYTHON:-/usr/bin/python3}"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/canon-studio"
+mkdir -p "$CACHE"
+
+WEBPID=""
+cleanup() { [ -n "$WEBPID" ] && kill "$WEBPID" 2>/dev/null; return 0; }
+trap cleanup EXIT INT TERM HUP
+
+"$PY" "$APP_DIR/canon_webd.py" --port "${CANON_PORT:-0}" \
+  >"$CACHE/url" 2>"$CACHE/webd.log" &
+WEBPID=$!
+
+URL=""
+for _ in $(seq 1 100); do
+  URL=$(head -n1 "$CACHE/url" 2>/dev/null | tr -d '\r\n')
+  [ -n "$URL" ] && break
+  kill -0 "$WEBPID" 2>/dev/null || break
+  sleep 0.15
+done
+
+if [ -z "$URL" ]; then
+  echo "canon-studio: 后端未能启动。日志：$CACHE/webd.log" >&2
+  tail -n 25 "$CACHE/webd.log" >&2 2>/dev/null
+  exit 1
+fi
+
+SHELL_OK=0
+if [ "${CANON_NO_SHELL:-0}" != "1" ] && \
+   "$PY" -c "import gi;gi.require_version('WebKit2','4.1')" 2>/dev/null; then
+  SHELL_OK=1
+fi
+
+if [ "$SHELL_OK" = "1" ]; then
+  "$PY" "$APP_DIR/canon-studio-shell.py" "$URL"
+  rc=$?
+else
+  if [ "${CANON_NO_SHELL:-0}" = "1" ]; then
+    echo "canon-studio: 已按 CANON_NO_SHELL=1 跳过原生窗口，改用默认浏览器：$URL" >&2
+  else
+    echo "canon-studio: 未找到 WebKit2 绑定（需 gir1.2-webkit2-4.1），改用默认浏览器：$URL" >&2
+  fi
+  xdg-open "$URL" >/dev/null 2>&1 &
+  echo "服务已就绪（PID $WEBPID），按 Ctrl+C 退出。"
+  wait "$WEBPID"
+  rc=0
+fi
+exit "$rc"

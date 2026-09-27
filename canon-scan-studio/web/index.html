@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Canon 扫描</title>
+<link rel="stylesheet" href="static/app.css">
+<script>
+/* 早期错误捕获：任何脚本异常都亮到页面底部，避免"界面空白但没提示" */
+(function () {
+  window.__diag = [];
+  function push(msg) {
+    window.__diag.push(msg);
+    var d = document.getElementById('errbox');
+    if (d) { d.style.display = 'block'; d.textContent = '页面脚本异常：' + window.__diag.join('  |  '); }
+  }
+  window.addEventListener('error', function (e) {
+    push((e.message || String(e.error)) + '  @' + (e.filename || '') + ':' + (e.lineno || '?'));
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e.reason;
+    push('Promise 未捕获：' + ((r && (r.message || r.stack)) || String(r)));
+  });
+  document.addEventListener('DOMContentLoaded', function () {
+    var d = document.createElement('div');
+    d.id = 'errbox';
+    d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:999;' +
+      'background:#7f1d1d;color:#fff;font:12px/1.5 monospace;padding:9px 12px;' +
+      'display:none;white-space:pre-wrap;max-height:34%;overflow:auto';
+    document.body.appendChild(d);
+    if (window.__diag.length) {
+      d.style.display = 'block';
+      d.textContent = '页面脚本异常：' + window.__diag.join('  |  ');
+    }
+  });
+})();
+</script>
+</head>
+<body class="dark">
+<div class="glow g1"></div><div class="glow g2"></div><div class="glow g3"></div>
+
+<div class="app">
+  <header class="topbar">
+    <div class="logo">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff"
+           stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 8.5V5.6A2.6 2.6 0 015.6 3H8.5M15.5 3h2.9A2.6 2.6 0 0121 5.6v2.9M21 15.5v2.9a2.6 2.6 0 01-2.6 2.6h-2.9M8.5 21H5.6A2.6 2.6 0 013 18.4v-2.9"/>
+        <path d="M3 12h18" stroke-width="2.1"/>
+      </svg>
+    </div>
+    <div class="brand"><b>Canon 扫描</b><s>SCAN STUDIO</s></div>
+
+    <div class="spacer"></div>
+
+    <div class="dev" id="devBox" title="点击切换扫描仪">
+      <span class="led"></span>
+      <div class="txt">
+        <div class="m" id="devName">正在查找扫描仪…</div>
+        <div class="p" id="devPath">—</div>
+      </div>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2.6" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+      <select id="devSel" aria-label="扫描仪"></select>
+    </div>
+
+    <button class="ico" id="btnFind" title="主动发现网络扫描仪（Canon 私有网络发现）">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="6.5"/><path d="M11 7.5v7M7.5 11h7"/>
+        <path d="M16 16l4.5 4.5"/></svg>
+    </button>
+    <button class="ico" id="btnFix" title="重新扫描设备（重新枚举 USB 与网络扫描仪，并复位 USB 扫描通道）">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12a9 9 0 11-2.7-6.4M21 3v6h-6"/></svg>
+    </button>
+    <button class="ico" id="btnTheme" title="切换深浅主题">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.85" stroke-linecap="round">
+        <path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>
+    </button>
+    <button class="ico" id="btnAbout" title="关于">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.9" stroke-linecap="round">
+        <circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6h.01"/></svg>
+    </button>
+  </header>
+
+  <div class="main">
+    <aside class="side">
+      <div class="card">
+        <div class="ct"><i></i><span>色彩模式</span></div>
+        <div class="seg c3" id="segMode"></div>
+      </div>
+
+      <div class="card">
+        <div class="ct"><i></i><span>分辨率</span><em id="resNote"></em></div>
+        <div class="seg c4" id="segRes"></div>
+        <div class="tip">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round">
+            <circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+          <span id="sizeTip">输出尺寸 —</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="ct"><i></i><span>扫描区域</span><em id="areaNote"></em></div>
+        <div class="row"><label>纸张</label>
+          <div class="sel"><span id="paperTxt">整幅玻璃</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2.6" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+            <select id="paperSel"></select></div>
+        </div>
+        <div class="row"><label>来源</label>
+          <div class="sel"><span id="srcTxt">玻璃稿台</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2.6" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+            <select id="srcSel"></select></div>
+        </div>
+        <div class="sl" id="slGamma" hidden>
+          <div class="t"><span>伽马</span><b id="gammaVal">2.2</b></div>
+          <input type="range" id="gamma" min="1" max="3" step="0.1" value="2.2">
+        </div>
+        <div class="sl" id="slThresh" hidden>
+          <div class="t"><span>黑白阈值</span><b id="threshVal">50</b></div>
+          <input type="range" id="thresh" min="0" max="100" step="1" value="50">
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="ct"><i></i><span>输出</span></div>
+        <div class="row"><label>格式</label>
+          <div class="sel"><span id="fmtTxt">PNG 图像</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2.6" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+            <select id="fmtSel">
+              <option value="png">PNG 图像</option>
+              <option value="jpg">JPEG 图像</option>
+              <option value="tif">TIFF 图像</option>
+              <option value="pdf">多页 PDF</option>
+            </select></div>
+        </div>
+        <div class="row"><label>目录</label>
+          <div class="sel" title="点击在文件管理器中打开"><span id="dirTxt">~/扫描</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 7.5A2 2 0 015 5.5h3.6l1.6 2H19a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+            </svg></div>
+        </div>
+      </div>
+
+      <div class="foot">
+        <button class="btn sec" id="btnPreview">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1.6 12S5.6 5 12 5s10.4 7 10.4 7-4 7-10.4 7S1.6 12 1.6 12z"/>
+            <circle cx="12" cy="12" r="2.7"/></svg>
+          快速预览
+        </button>
+        <button class="btn pri" id="btnScan">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 8.5V5.6A2.6 2.6 0 015.6 3H8.5M15.5 3h2.9A2.6 2.6 0 0121 5.6v2.9M21 15.5v2.9a2.6 2.6 0 01-2.6 2.6h-2.9M8.5 21H5.6A2.6 2.6 0 013 18.4v-2.9"/>
+            <path d="M3 12h18" stroke-width="2.2"/></svg>
+          开始扫描
+        </button>
+      </div>
+    </aside>
+
+    <section class="stage">
+      <div class="view" id="view">
+        <div class="mid" id="mid">
+          <div class="empty" id="empty">
+            <div class="ring">
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+                   stroke-linejoin="round" style="opacity:.55">
+                <path d="M3 8.5V5.6A2.6 2.6 0 015.6 3H8.5M15.5 3h2.9A2.6 2.6 0 0121 5.6v2.9M21 15.5v2.9a2.6 2.6 0 01-2.6 2.6h-2.9M8.5 21H5.6A2.6 2.6 0 013 18.4v-2.9"/>
+                <path d="M3 12h18" stroke-width="1.9"/></svg>
+            </div>
+            <h3 id="emptyTitle">准备就绪</h3>
+            <p id="emptyText">把原件放在玻璃稿台上，盖好盖子，然后点左下角的<b>开始扫描</b>。<br>
+              扫描过程会实时显示已扫出的画面。</p>
+          </div>
+          <div class="pwrap" id="pwrap" hidden>
+            <div class="paper" id="paper"><img id="paperImg" alt="扫描结果"></div>
+          </div>
+        </div>
+
+        <div class="corner tl hide" id="cornerTL">
+          <span class="led" id="cornerLed"></span>
+          <span id="cornerText">就绪</span>
+          <span class="m" id="cornerPct"></span>
+        </div>
+        <div class="corner tr hide" id="cornerTR">
+          第 <span class="m" id="pageNow" style="color:var(--text)">1</span> 页 ·
+          共 <span class="m" id="pageAll" style="color:var(--text)">1</span> 页
+        </div>
+
+        <div class="fbar hide" id="fbar">
+          <button class="fb" id="zoomOut" title="缩小">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
+          <div class="fbz" id="zoomVal">适应</div>
+          <button class="fb" id="zoomIn" title="放大">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+          <div class="fd"></div>
+          <button class="fb on" id="fitBtn" title="适应窗口">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
+          <button class="fb" id="realBtn" title="原始大小">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 3H5a2 2 0 00-2 2v3M16 3h3a2 2 0 012 2v3M21 16v3a2 2 0 01-2 2h-3M8 21H5a2 2 0 01-2-2v-3"/></svg></button>
+          <div class="fd"></div>
+          <button class="fb" id="saveOne" title="保存当前页">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/>
+              <path d="M17 21v-8H7v8M7 3v5h8"/></svg></button>
+          <button class="fb" id="delPage" title="删除当前页">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
+        </div>
+      </div>
+
+      <div class="tray">
+        <div class="tabs" id="tabs"></div>
+        <div class="tinfo">
+          <b id="tiTitle">尚无扫描</b>
+          <span id="tiMeta">选择参数后点「开始扫描」</span>
+        </div>
+        <div class="acts">
+          <button class="ab" id="btnNext" disabled>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            扫描下一页
+          </button>
+          <button class="ab pri" id="btnSave" disabled>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/>
+              <path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+            <span id="saveLabel">保存</span>
+          </button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <footer class="status">
+    <div class="sl2"><span class="led ok" id="stLed"></span><b id="stText">就绪</b></div>
+    <div class="pgwrap">
+      <div class="pg"><div class="f" id="stBar"></div></div>
+      <div class="pc" id="stPct">—</div>
+    </div>
+    <div class="vd"></div>
+    <div class="mt" id="stMeta">等待指令</div>
+    <div class="rr">
+      <div class="tag" id="stTag">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.8" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+        <span id="stTagText">设备通道就绪</span>
+      </div>
+      <div class="vd"></div>
+      <div class="mt">SANE pixma · 原生 loong64</div>
+    </div>
+  </footer>
+</div>
+
+<div class="overlay" id="dlgOverlay">
+  <div class="dialog" id="dlg">
+    <h3 id="dlgTitle"></h3>
+    <p id="dlgBody"></p>
+    <div class="dlgacts" id="dlgActs"></div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script src="static/app.js"></script>
+</body>
+</html>

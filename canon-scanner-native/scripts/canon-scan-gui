@@ -1,0 +1,35 @@
+#!/bin/bash
+# canon-scan-gui —— 打开图形扫描界面
+#
+# 优先级：
+#   canon-studio（Canon 扫描工作室，本套件的原生界面，首选）
+#   -> xsane -> simple-scan -> gscan2pdf -> skanlite
+#
+# ⚠ 本脚本**刻意跳过 lz-scan（靓仔扫描）**。
+#   它 1.9.x 会把 SANE 设备名里含 "pixma" 的一律判为"网络设备"，
+#   然后拿中文显示名（如 "[网络] CANON Canon PIXMA G3010 Series"）去 sane_open，
+#   那并不是一个存在的 SANE 设备名 —— 必然失败。对任何走 SANE pixma 后端的
+#   佳能 USB 扫描仪都不可用。这是 lz-scan 自身的缺陷，与扫描驱动无关。
+set -u
+
+for c in canon-studio xsane simple-scan gscan2pdf skanlite; do
+    if command -v "$c" >/dev/null 2>&1; then
+        echo "canon-scan-gui: 启动 $c" >&2
+        exec "$c" "$@"
+    fi
+done
+
+cat >&2 <<'EOF'
+canon-scan-gui: 本机没有可用的图形扫描前端。
+
+任选其一安装（需联网）：
+    oma install --yes canon-scan-studio   # 本套件的原生界面（推荐）
+    oma install --yes xsane               # 功能最全
+    oma install --yes simple-scan         # 界面最简洁
+
+注意：lz-scan（靓仔扫描）不适用 —— 它会把 pixma 设备误判为网络设备。
+
+或者不用图形界面，直接用命令行：
+    canon-scan --resolution 300 --mode Gray -o out.png
+EOF
+exit 1
