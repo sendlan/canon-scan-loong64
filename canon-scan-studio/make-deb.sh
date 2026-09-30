@@ -4,7 +4,7 @@ set -eu
 
 PKG=canon-scan-studio
 VER=1.0
-REV=11
+REV=12
 ARCH=loong64
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"

@@ -85,6 +85,7 @@ PAPERS = [
 HAS_PIL = False
 try:
     from PIL import Image
+    from PIL import ImageFilter
     HAS_PIL = True
 except Exception:
     Image = None
@@ -917,11 +918,27 @@ class Gallery:
     def add(self, task, dpi=300):
         if task.image is None:
             return None
+        return self.add_image(task.image, task.thumb, task.saved_path, dpi)
+
+    def add_image(self, image, thumb=None, path=None, dpi=300):
+        if image is None:
+            return None
+        if thumb is None:
+            try:
+                t = image.copy()
+                t.thumbnail((190, 260), Image.BILINEAR)
+                if t.mode not in ("RGB", "L"):
+                    t = t.convert("RGB")
+                buf = io.BytesIO()
+                t.save(buf, "JPEG", quality=80)
+                thumb = buf.getvalue()
+            except Exception as e:                      # noqa: BLE001
+                log("补缩略图失败:", e)
         with self.lock:
-            self.pages.append({"img": task.image, "thumb": task.thumb,
-                               "path": task.saved_path, "dpi": dpi,
-                               "w": task.image.width, "h": task.image.height,
-                               "mode": task.image.mode})
+            self.pages.append({"img": image, "thumb": thumb,
+                               "path": path, "dpi": dpi,
+                               "w": image.width, "h": image.height,
+                               "mode": image.mode})
             return len(self.pages) - 1
 
     def clear(self):
@@ -948,6 +965,134 @@ class Gallery:
         imgs[0].save(path, "PDF", save_all=True, append_images=imgs[1:],
                      resolution=float(self.pages[0].get("dpi", 300) or 300))
         return path, ""
+
+
+def _proj_seg(proj, lo, hi, min_len, thr):
+    """把一维投影拆成「连续超阈值」段，返回 [(start,end), ...] 按能量降序。"""
+    segs = []
+    s = None
+    for i in range(lo, hi):
+        if proj[i] > thr:
+            if s is None:
+                s = i
+        elif s is not None:
+            if i - s >= min_len:
+                segs.append((s, i))
+            s = None
+    if s is not None and hi - s >= min_len:
+        segs.append((s, hi))
+    segs.sort(key=lambda b: sum(proj[b[0]:b[1]]), reverse=True)
+    return segs
+
+
+def detect_card(im):
+    """在整幅玻璃扫描图中自动识别并裁出身份证。
+
+    不假设盖板颜色/明暗/摆放角度：把原图降采样后，每个像素取「边缘能量 + 到
+    背景参考色的色差」作为"内容量"，做行/列投影；枚举所有合格的行段×列段组合，
+    按「面积占比合理 + 宽高比最接近身份证(≈1.59)」打分，取最优矩形。
+    失败返回 None（调用方降级为整幅）。
+
+    返回原图坐标 (left, top, right, bottom)。
+    """
+    orig_w, orig_h = im.size
+    sw = 480
+    sh = max(2, int(round(orig_h * sw / float(orig_w))))
+    small = im.convert("RGB").resize((sw, sh), Image.BILINEAR)
+    edges = list(small.convert("L").filter(ImageFilter.FIND_EDGES).getdata())
+
+    # 背景参考色 = 各通道中位亮度（不假设白色/黑色盖板）
+    px = list(small.getdata())
+    chans = list(zip(*px))
+    bg = tuple(sorted(c)[len(c) // 2] for c in chans)
+
+    rows = [0] * sh
+    cols = [0] * sw
+    # 排除最外圈：FIND_EDGES 对越界像素的填充会在边界行/列产生伪高边缘，
+    # 而扫描内容（身份证）不会贴在玻璃边缘
+    for y in range(1, sh - 1):
+        base = y * sw
+        s = 0
+        for x in range(1, sw - 1):
+            r, g, b = px[base + x]
+            dist = abs(r - bg[0]) + abs(g - bg[1]) + abs(b - bg[2])
+            if edges[base + x] + dist * 0.45 > 34:
+                s += 1
+                cols[x] += 1
+        rows[y] = s
+
+    def segs(proj, n, bias=0.16):
+        m = max(proj) or 1
+        thr = max(20, int(m * bias))
+        return _proj_seg(proj, 0, n, max(10, int(n * 0.03)), thr)
+
+    rs = segs(rows, sh)
+    cs = segs(cols, sw)
+    if not rs or not cs:
+        return None
+
+    total = sw * sh
+    AR0 = 85.6 / 54.0                        # 身份证参考宽高比 ≈1.586
+    best = None
+    best_score = None
+    for (ry0, ry1), (cx0, cx1) in ((r, c) for r in rs for c in cs):
+        bw, bh = cx1 - cx0, ry1 - ry0
+        if bw < 20 or bh < 20:
+            continue
+        area = bw * bh
+        if area < total * 0.006 or area > total * 0.55:
+            continue
+        ar = bw / float(bh)
+        if not (0.3 <= ar <= 3.2):
+            continue
+        energy = sum(rows[ry0:ry1]) + sum(cols[cx0:cx1])
+        score = energy / float(total) - 6.0 * abs(ar - AR0)
+        if best_score is None or score > best_score:
+            best_score = score
+            best = (ry0, ry1, cx0, cx1)
+    if best is None:
+        return None
+    ry0, ry1, cx0, cx1 = best
+
+    bw, bh = cx1 - cx0, ry1 - ry0
+    padx = max(2, int(bw * 0.04))
+    pady = max(2, int(bh * 0.04))
+    sx, sy = orig_w / float(sw), orig_h / float(sh)
+    left = max(0, int(round((cx0 - padx) * sx)))
+    top = max(0, int(round((ry0 - pady) * sy)))
+    right = min(orig_w, int(round((cx1 + padx) * sx)))
+    bottom = min(orig_h, int(round((ry1 + pady) * sy)))
+    if right - left < 8 or bottom - top < 8:
+        return None
+    return (left, top, right, bottom)
+
+
+def compose_id_page(front, back, layout="tb", dpi=300,
+                    box_front=None, box_back=None):
+    """身份证正反面合成一页：A4 白底，上下（或左右）各放一张抠出的卡片。
+    每面优先用调用方传入的检测框（box_front/box_back），未传则自动检测；
+    检测失败时该面降级为整幅缩放（contain + 居中）。"""
+    w = int(round(210.0 / 25.4 * dpi))
+    h = int(round(297.0 / 25.4 * dpi))
+    canvas = Image.new("RGB", (w, h), "white")
+    if layout not in ("lr",):
+        layout = "tb"
+    for i, src in enumerate((front, back)):
+        box = (box_front, box_back)[i]
+        if box is None:
+            box = detect_card(src)
+        im = src if box is None else src.crop(box)
+        if im.mode != "RGB":
+            im = im.convert("RGB")
+        if layout == "tb":
+            bh = h // 2
+            im.thumbnail((w, bh), Image.BILINEAR)
+            canvas.paste(im, ((w - im.width) // 2, bh * i + (bh - im.height) // 2))
+        else:
+            bw = w // 2
+            im.thumbnail((bw, h), Image.BILINEAR)
+            canvas.paste(im, (bw * i + (bw - im.width) // 2, (h - im.height) // 2))
+    return canvas
 
 
 GALLERY = Gallery()
@@ -1063,6 +1208,19 @@ class Handler(BaseHTTPRequestHandler):
                 if th:
                     return self._send(200, th, "image/jpeg")
             return self._send(404, b"", "image/jpeg")
+        if p == "/api/card-check":
+            tid = (q.get("t") or [""])[0]
+            t = TASKS.get(tid)
+            if not t or t.image is None:
+                return self._json({"error": "没有可分析的图像"}, 400)
+            if not HAS_PIL:
+                return self._json({"error": "本机缺少 Pillow"}, 400)
+            try:
+                box = detect_card(t.image)
+            except Exception as e:                      # noqa: BLE001
+                return self._json({"error": "分析失败：%s" % e}, 500)
+            return self._json({"ok": bool(box),
+                               "W": t.image.width, "H": t.image.height})
         if p == "/api/result":
             tid = (q.get("t") or [""])[0]
             idx = (q.get("i") or [""])[0]
@@ -1201,6 +1359,33 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "index": i,
                                "count": len(GALLERY.pages)})
 
+        if p == "/api/merge-id":
+            # 身份证模式：正面 task + 反面 task 合成一页 A4 入库
+            front = TASKS.get(b.get("front") or "")
+            back = TASKS.get(b.get("back") or "")
+            if front is None or back is None or front.image is None \
+                    or back.image is None:
+                return self._json({"error": "缺正面或反面图像"}, 400)
+            if not HAS_PIL:
+                return self._json({"error": "本机缺少 Pillow，无法合成"}, 400)
+            box_f = detect_card(front.image)
+            box_b = detect_card(back.image)
+            if box_f is None or box_b is None:
+                return self._json({
+                    "error": "稿台上未检测到身份证或卡片，"
+                             "请放置证件后重扫（本次数据已丢弃）"}, 422)
+            try:
+                img = compose_id_page(front.image, back.image,
+                                      b.get("layout") or "tb",
+                                      box_front=box_f, box_back=box_b)
+            except Exception as e:                      # noqa: BLE001
+                log("身份证合成失败:", e)
+                return self._json({"error": "合成失败：%s" % e}, 500)
+            i = GALLERY.add_image(img, dpi=300)
+            return self._json({"ok": True, "index": i,
+                               "W": img.width, "H": img.height,
+                               "count": len(GALLERY.pages)})
+
         if p == "/api/save":
             fmt = (b.get("format") or "png").lower()
             if fmt == "pdf":
@@ -1220,6 +1405,18 @@ class Handler(BaseHTTPRequestHandler):
             if err:
                 return self._json({"error": err}, 400)
             return self._json({"ok": True, "path": path})
+
+        if p == "/api/drop-task":
+            # 丢弃一次扫描数据（身份证模式检测不到证件时）：释放图像内存
+            tid = b.get("task") or ""
+            with TASKS_LOCK:
+                t = TASKS.pop(tid, None)
+            if t is not None:
+                try:
+                    t.cancel()
+                except Exception:                       # noqa: BLE001
+                    pass
+            return self._json({"ok": True})
 
         if p == "/api/clear":
             GALLERY.clear()

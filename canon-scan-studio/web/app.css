@@ -237,6 +237,25 @@ body.light .btn.sec{color:#6355e8;background:rgba(124,108,255,.1)}
 .beam::after{content:"";position:absolute;left:0;right:0;top:2px;height:70px;
   background:linear-gradient(180deg,rgba(53,214,214,.18),transparent)}
 
+/* 网络扫描占位（无逐行预览时的「扫描光束」动画） */
+.netscan{position:absolute;inset:0;overflow:hidden;z-index:2;
+  display:grid;place-items:center;pointer-events:none;
+  color:var(--dim);text-align:center;background:
+    radial-gradient(60% 55% at 50% 42%,rgba(53,214,214,.06),transparent 70%)}
+.netscan .ns-beam{position:absolute;left:0;right:0;top:0;height:2px;
+  background:linear-gradient(90deg,transparent,rgba(53,214,214,.95) 25%,#b6ffff 50%,
+    rgba(53,214,214,.95) 75%,transparent);
+  box-shadow:0 0 18px rgba(53,214,214,.85),0 0 42px rgba(53,214,214,.45);
+  animation:nscanY 2.8s linear infinite}
+.netscan .ns-beam::after{content:"";position:absolute;left:0;right:0;top:2px;height:70px;
+  background:linear-gradient(180deg,rgba(53,214,214,.22),transparent)}
+.netscan .ns-mid{display:flex;flex-direction:column;align-items:center;gap:9px;
+  padding:26px 34px;border-radius:16px;background:var(--panel);
+  border:1px solid var(--bd2);box-shadow:0 14px 40px rgba(0,0,0,.28)}
+.netscan .ns-st{font-size:13px;font-weight:700;color:var(--text)}
+.netscan .ns-by{font-size:11px;opacity:.75}
+@keyframes nscanY{from{top:0}to{top:100%}}
+
 /* 空态 */
 .empty{display:flex;flex-direction:column;align-items:center;gap:16px;text-align:center;
   color:var(--dim)}

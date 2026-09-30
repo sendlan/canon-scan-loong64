@@ -23,6 +23,9 @@ const S = {
   previewSeq: -1, previewAt: 0, pendingSeq: null, previewTimer: null,
   mmW: 216.069, mmH: 297.011, _warm: false,
   netFixed: false,          // 网络设备：出图参数由设备侧固定，界面锁死
+  idMode: false,            // 身份证模式：两扫合成一页 A4
+  idStep: 0,                // 0=初始 1=正面已扫待翻面 2=正在扫反面
+  idFront: null, idBack: null,
 };
 
 function toast(kind, html, ms = 4200) {
@@ -294,6 +297,37 @@ function setBeamVisible(on) {
   beam.style.display = '';
 }
 
+/* 网络扫描没有可逐行解码的预览，接收整幅 JPEG 期间画面是空的——
+   用「纸张 + 扫描光束动画 + 实时字节」占位，避免看起来像卡死 */
+let netScanOverlay = null;
+function showNetScanning() {
+  if (netScanOverlay || !S.dev || !S.dev.net) return;
+  const el = document.createElement('div');
+  el.className = 'netscan';
+  el.innerHTML = `<span class="ns-beam"></span>
+    <div class="ns-mid">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" opacity=".5">
+        <rect x="2.5" y="6" width="19" height="12" rx="2"/>
+        <circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="12" r="3.4" stroke-dasharray="4 3"/>
+        <path d="M18 9h.01M17.5 14.5h.01"/></svg>
+      <b class="ns-st" id="nsSt">正在接收图像…</b>
+      <span class="ns-by" id="nsBy"></span>
+    </div>`;
+  el.id = 'netScanOv';
+  $('#paper').appendChild(el);
+  netScanOverlay = el;
+}
+function setNetScan(stage, bytes) {
+  const el = netScanOverlay || $('#netScanOv');
+  if (!el) return;
+  if (stage != null) $('#nsSt').textContent = stage;
+  if (bytes != null) $('#nsBy').textContent = bytes;
+}
+function hideNetScanning() {
+  if (netScanOverlay) { netScanOverlay.remove(); netScanOverlay = null; }
+}
+
 function buildOpts() {
   const paper = paperById($('#paperSel').value || 'max');
   const o = {
@@ -316,6 +350,10 @@ function buildOpts() {
 async function startScan(kind = 'scan') {
   if (S.scanning) return;
   if (!S.dev) { toast('err', '没有可用的扫描仪'); return; }
+  if (S.idMode && S.idStep === 1) {
+    toast('warn', '等待翻面：请把身份证反面朝下放回同一位置并盖好盖子');
+    return;
+  }
 
   const opts = buildOpts();
   S.scanning = true; S.cur = -1; S.previewSeq = -1; S._warm = false;
@@ -329,8 +367,10 @@ async function startScan(kind = 'scan') {
   S.paperW = est.w; S.paperH = est.h;
   $('#paperImg').removeAttribute('src');
   $('#paperImg').hidden = false;
+  wirePreview($('#paperImg'));
   setBeamVisible(true);
   showPaper(); layoutPaper();
+  if (S.dev.net) showNetScanning();
 
   setStatus('', kind === 'preview' ? '快速预览中…' : '正在扫描…');
   setProgress(0, true);
@@ -427,7 +467,9 @@ function handleEvent(ev, task) {
       $('#cornerPct').textContent = ev.pct ? ev.pct.toFixed(0) + '%' : '';
       $('#stMeta').textContent = `${fmtBytes(ev.bytes)} / ${fmtBytes(ev.total || 0)}`
         + ` · 已用 ${ev.elapsed}s`;
-      if (ev.seq !== undefined && ev.seq !== S.previewSeq) {
+      if (S.dev.net) setNetScan(null,
+        `${fmtBytes(ev.bytes)} / ${fmtBytes(ev.total || 0)} · ${ev.elapsed}s`);
+      if (!S.dev.net && ev.seq !== undefined && ev.seq !== S.previewSeq) {
         S.previewSeq = ev.seq;
         pushPreview(task, ev.seq);
       }
@@ -436,7 +478,10 @@ function handleEvent(ev, task) {
 
     // 网络扫描（CHMP）没有逐行数据流，用后端阶段文字代替实时预览提示
     case 'stage':
-      if (ev.msg) setStatus('', ev.msg + '…');
+      if (ev.msg) {
+        setStatus('', ev.msg + '…');
+        if (S.dev.net) setNetScan(ev.msg);
+      }
       break;
 
     case 'retry':
@@ -447,6 +492,7 @@ function handleEvent(ev, task) {
       break;
 
     case 'done': {
+      hideNetScanning();
       S.scanning = false;
       setProgress(100, false);
       setStatus('ok', '扫描完成');
@@ -462,15 +508,22 @@ function handleEvent(ev, task) {
     }
 
     case 'error':
+      hideNetScanning();
       finishFail(ev.msg || '扫描失败', ev.hint);
       break;
 
     case 'cancelled':
+      hideNetScanning();
       S.scanning = false;
       cancelFinishLocal();
       toast('warn', '扫描已取消');
       break;
   }
+}
+
+function wirePreview(img) {
+  img.onload = () => { img.style.visibility = ''; syncBeam(); };
+  img.onerror = () => { img.style.visibility = 'hidden'; };
 }
 
 function pushPreview(task, seq) {
@@ -480,7 +533,7 @@ function pushPreview(task, seq) {
     const s = S.pendingSeq ?? seq; S.pendingSeq = null;
     const img = $('#paperImg');
     img.hidden = false;
-    img.onload = () => syncBeam();
+    wirePreview(img);
     img.src = `/api/live?t=${task}&n=${s}`;
   };
   if (now - S.previewAt >= 130) go();
@@ -492,13 +545,72 @@ function pushPreview(task, seq) {
   }
 }
 
-function loadFinal(task, ev) {
+async function checkCard(task) {
+  let r;
+  try { r = await api(`/api/card-check?t=${encodeURIComponent(task)}`); }
+  catch { return true; }                 // 接口不可用 → 放行，不误丢
+  return r ? !!r.ok : true;
+}
+
+function discardScan(msg, task) {
+  if (task) api('/api/drop-task', { task });
+  const img = $('#paperImg');
+  img.removeAttribute('src');
+  img.hidden = false;
+  wirePreview(img);
+  setStatus('err', msg);
+}
+
+// 检测不到证件/卡片：模态弹窗，用户确认后才放行重扫（期间扫描按钮保持禁用）
+function confirmRedo(msg, cb) {
+  dialog({
+    title: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--warn)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>未检测到证件',
+    body: `<b>${msg}</b><br>
+      <span style="font-size:11px;opacity:.75">本次扫描数据已丢弃，不会加入画廊。请放好证件后点「重新扫描」。</span>`,
+    acts: [
+      { label: '取消', onClick: () => { resetButtons(); } },
+      { label: '重新扫描', pri: true, onClick: () => { resetButtons(); startScan('scan'); } },
+    ],
+  });
+}
+
+async function loadFinal(task, ev) {
   const img = $('#paperImg');
   S.paperW = ev.W; S.paperH = ev.H;
   layoutPaper();
   const w = Math.max(1200, Math.round($('#pwrap').clientWidth * 2));
-  img.onload = () => syncBeam();
+  wirePreview(img);
   img.src = `/api/result?t=${task}&w=${w}`;
+  toast('ok', `扫描完成：<b>${ev.W} × ${ev.H}</b> · ${fmtBytes(ev.bytes)}`
+    + (ev.retried ? '（已自动恢复）' : ''));
+
+  // 身份证模式第一面（正面）：不加入画廊，提示翻面
+  if (S.idMode && S.idStep === 0) {
+    if (!(await checkCard(task))) {
+      S.idFront = null; S.idStep = 0;
+      discardScan('稿件台上未检测到身份证或卡片', task);
+      confirmRedo('稿件台上未检测到身份证或卡片');
+      return;
+    }
+    S.idFront = task;
+    S.idStep = 1;
+    resetButtons();
+    promptFlip();
+    return;
+  }
+  // 身份证模式第二面（反面）：合成一页入库
+  if (S.idMode && S.idStep === 2) {
+    if (!(await checkCard(task))) {
+      S.idBack = null; S.idStep = 2;
+      discardScan('反面未检测到身份证或卡片', task);
+      confirmRedo('反面未检测到证件或卡片，正面已保留');
+      return;
+    }
+    S.idBack = task;
+    mergeIdPages();
+    return;
+  }
+
   api('/api/add-page', { task }).then(r => {
     if (r.ok) {
       S.pages.push({ index: r.index, w: ev.W, h: ev.H });
@@ -507,12 +619,47 @@ function loadFinal(task, ev) {
     }
     resetButtons();
   });
-  toast('ok', `扫描完成：<b>${ev.W} × ${ev.H}</b> · ${fmtBytes(ev.bytes)}`
-    + (ev.retried ? '（已自动恢复）' : ''));
+}
+
+function resetIdFlow() {
+  S.idStep = 0; S.idFront = null; S.idBack = null;
+}
+
+function promptFlip() {
+  dialog({
+    title: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="10" rx="2"/><path d="M7 20h10M8 16v4M16 16v4"/></svg>已扫描正面',
+    body: `<b>请打开盖子，将身份证</b>翻面<b>（反面朝下）放回玻璃的同一位置</b>，盖好盖子。<br>
+      <span style="font-size:11px;opacity:.75">放好后点「已翻面，继续」扫反面；点「放弃」则丢弃这次身份证扫描，画廊不变。</span>`,
+    acts: [
+      { label: '放弃', onClick: () => { resetIdFlow(); setStatus('', '已放弃身份证扫描'); } },
+      { label: '已翻面，继续', pri: true, onClick: () => { S.idStep = 2; startScan('scan'); } },
+    ],
+  });
+}
+
+async function mergeIdPages() {
+  const r = await api('/api/merge-id', { front: S.idFront, back: S.idBack, layout: 'tb' });
+  const front = S.idFront;
+  resetIdFlow();
+  if (r.error || r.index == null) {
+    toast('err', r.error || '合成失败');
+    setStatus('err', '身份证合成失败');
+    resetButtons();
+    return;
+  }
+  const page = { index: r.index, w: r.W, h: r.H };
+  S.pages.push(page);
+  S.cur = S.pages.length - 1;
+  renderTabs();
+  selectPage(S.cur);
+  resetButtons();
+  toast('ok', `身份证正反面已合成一页：<b>${r.W} × ${r.H}</b>`
+    + `<br><span style="font-size:11px;opacity:.75">正面在上半，反面在下半 · 300 dpi</span>`, 8000);
 }
 
 function finishFail(msg, hint) {
   S.scanning = false;
+  resetIdFlow();
   setStatus('err', '扫描失败');
   setTag('err', '设备通道异常');
   setProgress(null, false);
@@ -540,6 +687,7 @@ function cancelFinishLocal() {
   $('#cornerLed').className = 'led warn';
   $('#cornerText').textContent = '已取消';
   $('#stMeta').textContent = '用户取消';
+  resetIdFlow();
   resetButtons();
   api('/api/fix', {}).then(() => setTag('', '设备通道就绪'));
 }
@@ -583,7 +731,7 @@ function selectPage(i) {
   setBeamVisible(false);
   showPaper();
   const img = $('#paperImg');
-  img.onload = () => syncBeam();
+  wirePreview(img);
   img.src = `/api/result?i=${p.index}&w=1600&_=${Date.now()}`;
   layoutPaper();
   $('#pageNow').textContent = i + 1;
@@ -812,7 +960,10 @@ async function doRescan() {
 }
 
 function bind() {
-  $('#btnScan').onclick = () => startScan('scan');
+  $('#btnScan').onclick = () => {
+    if (S.idMode && S.idStep === 1) { S.idStep = 2; startScan('scan'); return; }
+    startScan('scan');
+  };
   $('#btnPreview').onclick = () => startScan('preview');
   $('#btnNext').onclick = () => scanNextPage();
   $('#btnSave').onclick = () => doSave();
@@ -831,6 +982,27 @@ function bind() {
     if (S.zoom < 0.12) S.zoom = 0;
     layoutPaper();
   };
+
+  /* 身份证 / 整页 扫描模式（与设备参数无关，一次构建） */
+  {
+    const kinds = [['page', '整页'], ['id', '身份证']];
+    const seg = $('#segKind');
+    const draw = () => {
+      seg.className = 'seg c2';
+      seg.innerHTML = '';
+      kinds.forEach(([v, txt]) => {
+        const b = document.createElement('b');
+        b.textContent = txt;
+        b.dataset.v = v;
+        b.classList.toggle('on', (v === 'id') === !!S.idMode);
+        b.onclick = () => { S.idMode = v === 'id'; resetIdFlow(); draw(); };
+        seg.appendChild(b);
+      });
+      $('#idTip').hidden = !S.idMode;
+      $('#modeNote').textContent = S.idMode ? '两扫一页 · A4' : '';
+    };
+    draw();
+  }
 
   $('#fmtSel').onchange = () => {
     const v = $('#fmtSel').value;
