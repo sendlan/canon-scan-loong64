@@ -5,7 +5,13 @@ set -eu
 PKG=canon-scan-studio
 VER=1.0
 REV=12
-ARCH=loong64
+# 纯 Python + 资源，没有任何 ELF —— Architecture: all 本来就是正确取值，
+# 且 dpkg 在 loong64 / loongarch64 上都接受。要架构专包就 ARCH=loong64 覆盖。
+ARCH="${ARCH:-all}"
+# 依赖包名随发行版不同时可覆盖，例如 AOSC：
+#   DEPS="python3, sane-backends, python-pillow, gtk3, webkitgtk" bash make-deb.sh
+DEPS="${DEPS:-python3 (>= 3.9), sane-utils, libsane1}"
+
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 PKGPOOL="$(cd "$ROOT/.." && pwd)/packages"   # 产物汇总处（唯一出包位置）
@@ -13,6 +19,14 @@ STAGE="$ROOT/build/stage"
 DIST="$PKGPOOL"                              # 直接出到仓库 packages/，不再另开 dist/ 副本
 DOC="$STAGE/usr/share/doc/$PKG"
 DEBFILE="$DIST/${PKG}_${VER}-${REV}_${ARCH}.deb"
+
+# 维护者署名：自动取当前 git 仓库身份（user.name / user.email），即你的
+# GitHub 身份，保证打包元数据与提交作者一致；取不到用默认值，可覆盖。
+GIT_NAME="$(git -C "$ROOT" config user.name 2>/dev/null || true)"
+GIT_MAIL="$(git -C "$ROOT" config user.email 2>/dev/null || true)"
+MAINT_NAME="${MAINT_NAME:-${GIT_NAME:-sendlan}}"
+MAINT_MAIL="${MAINT_MAIL:-${GIT_MAIL:-sendlan@outlook.com}}"
+MAINTAINER="${MAINTAINER:-$MAINT_NAME <$MAINT_MAIL>}"
 
 rm -rf "$ROOT/build"
 mkdir -p "$STAGE/DEBIAN" "$STAGE/usr/bin" \
@@ -39,13 +53,13 @@ install -m644 "$ROOT/data/canon-studio.svg" \
 # ---------- 文档 ----------
 [ -f "$ROOT/data/README.zh-CN.md" ] && install -m644 "$ROOT/data/README.zh-CN.md" "$DOC/README.md"
 
-cat > "$DOC/copyright" <<'EOF'
+cat > "$DOC/copyright" <<EOF
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: canon-scan-studio
 Source: 自研，无上游代码仓库
 
 Files: *
-Copyright: 2026 atree
+Copyright: 2026 $MAINT_NAME
 License: GPL-2.0-or-later
  本套件为独立实现，不含任何厂商源代码或二进制。网络扫描的 IVEC/CHMP 命令体
  由本项目自行实现，与原厂驱动真机抓包逐字节一致；此类命令体属互操作必需的
@@ -62,9 +76,9 @@ cat > "$STAGE/DEBIAN/control" <<EOF
 Package: $PKG
 Version: $VER-$REV
 Architecture: $ARCH
-Maintainer: atree <local>
+Maintainer: $MAINTAINER
 Installed-Size: $SIZE
-Depends: python3 (>= 3.9), sane-utils, libsane1
+Depends: $DEPS
 Recommends: python3-pil, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, canon-scanner-native
 Section: graphics
 Priority: optional

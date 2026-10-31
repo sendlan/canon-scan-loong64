@@ -27,7 +27,7 @@ import time
 import queue
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -1095,6 +1095,165 @@ def compose_id_page(front, back, layout="tb", dpi=300,
     return canvas
 
 
+def _task_dpi(task, default=300):
+    """从任务参数里取扫描分辨率（dpi）；取不到用 default。"""
+    try:
+        return int(float((task.opts or {}).get("resolution") or default))
+    except Exception:                                   # noqa: BLE001
+        return default
+
+
+def compose_two_pages(page_a, page_b, layout="h", rotate="cw", dpi=300,
+                      sheet=(210.0, 297.0)):
+    """把两页 A4 排到一张 A4 上（「两页合一」／2-up）。
+
+    纸张固定 **A4 竖放**（210×297）：
+
+      layout="h"（横向，默认）：两页**各自转 90° 成横向**，上下叠放（A 上、B 下）。
+                                每页正好 210×148.5（A5 横），两张拼满整张 A4。
+      layout="v"（纵向）：两页**保持竖向**，左右并排（A 左、B 右）。
+
+      rotate 只对横向有效，决定转 90° 的方向：
+        "cw" （默认，顺时针）：原稿顶边落到成品右边 —— 拿纸顺时针转一下即可读；
+        "ccw"（逆时针）      ：原稿顶边落到成品左边 —— 拿纸逆时针转一下即可读。
+
+    两页都按原比例等比缩放（contain）后居中，白底；除横向那次 90° 旋转外
+    不做任何变形。
+    """
+    if not HAS_PIL:
+        raise RuntimeError("本机缺少 Pillow")
+    if layout not in ("h", "v"):
+        layout = "h"
+    if rotate not in ("cw", "ccw"):
+        rotate = "cw"
+    rot = Image.ROTATE_270 if rotate == "cw" else Image.ROTATE_90
+    sw, sh = sheet
+    w = max(1, int(round(sw / 25.4 * dpi)))
+    h = max(1, int(round(sh / 25.4 * dpi)))
+    canvas = Image.new("RGB", (w, h), "white")
+    if layout == "v":
+        slot_w, slot_h = w // 2, h
+    else:
+        slot_w, slot_h = w, h // 2
+    for i, src in enumerate((page_a, page_b)):
+        if src is None:
+            continue
+        im = src if src.mode == "RGB" else src.convert("RGB")
+        im = im.copy()
+        if layout == "h":
+            im = im.transpose(rot)                  # 横向：整页转 90°
+        im.thumbnail((slot_w, slot_h), Image.BILINEAR)
+        if layout == "v":
+            x = slot_w * i + (slot_w - im.width) // 2
+            y = (h - im.height) // 2
+        else:
+            x = (w - im.width) // 2
+            y = slot_h * i + (slot_h - im.height) // 2
+        canvas.paste(im, (x, y))
+    return canvas
+
+
+# ======================================================================
+#  在文件管理器中打开 —— KDE / KIO 兼容实现
+#
+#  旧实现有 3 个毛病（用户报「无法创建 KIO 工作程序」就是它们造成的）：
+#    1. 用 Popen 起进程就算成功：xdg-open 在 KDE 下转发给 kde-open → KIO，
+#       KIO 崩掉时子进程早已退出，界面却照报「已打开」。
+#    2. 顺序错：xdg-open 排第一，而本机 org.freedesktop.FileManager1
+#       的 D-Bus 调用其实是通的，永远轮不到。
+#    3. file:// URL 没百分号编码，中文路径（~/扫描）在部分实现下直接失败。
+#
+#  现在的做法：逐级尝试，每一级都看真实退出码，全失败时把最后的 stderr
+#  回给前端，让用户看到到底为什么打不开。
+# ======================================================================
+
+REVEAL_TIMEOUT = 8.0
+
+
+def _reveal_attempt(cmd, timeout=REVEAL_TIMEOUT):
+    """跑一条打开命令，返回 (成功?, 错误描述)。"""
+    try:
+        r = subprocess.run(cmd, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, timeout=timeout)
+    except FileNotFoundError:
+        return False, "%s 不存在" % cmd[0]
+    except subprocess.TimeoutExpired:
+        # 超时不等于失败：文件管理器常驻进程被唤起后不一定立刻退出
+        return True, ""
+    except Exception as e:                          # noqa: BLE001
+        return False, "%s：%s" % (cmd[0], e)
+    if r.returncode == 0:
+        return True, ""
+    err = (r.stderr or b"").decode("utf-8", "replace").strip()
+    if not err:
+        err = (r.stdout or b"").decode("utf-8", "replace").strip()
+    if not err:
+        err = "退出码 %d" % r.returncode
+    return False, "%s：%s" % (cmd[0], err.splitlines()[-1] if err else "失败")
+
+
+def _file_url(path):
+    """把本地路径转成 file:// URL（正确处理中文、空格、# 等字符）。"""
+    return "file://" + quote(path, safe="/")
+
+
+def reveal_path(path, target=None):
+    """在文件管理器中显示 path（文件则选中它，目录则打开它）。
+
+    返回 (成功?, 错误描述)。失败时错误描述可原样显示给用户。
+    """
+    if target is None:
+        target = os.path.dirname(path) if os.path.isfile(path) else path
+    if not os.path.exists(target):
+        return False, "路径不存在：%s" % target
+    url = _file_url(path)
+    dir_url = _file_url(target)
+
+    want_file = os.path.isfile(path)
+
+    # 逐级尝试：能「选中文件」的方式优先，其次才是「打开所在目录」。
+    cands = []
+    if want_file:
+        # 1) FileManager1 D-Bus：能直接选中文件（GNOME/KDE 都支持）
+        cands.append(([
+            "dbus-send", "--session", "--print-reply",
+            "--dest=org.freedesktop.FileManager1",
+            "--type=method_call", "/org/freedesktop/FileManager1",
+            "org.freedesktop.FileManager1.ShowItems",
+            "array:string:" + url, "string:",
+        ], "FileManager1"))
+        # 2) dolphin --select：KDE 原生，选中文件
+        cands.append((["dolphin", "--select", path], "dolphin --select"))
+    # 3) 打开所在目录的通用方式
+    #    gio 排在 xdg-open 前面：KDE 下 xdg-open → kde-open → KIO，
+    #    一旦 KIO socket 没起来就必然失败（用户报的正是这个）；
+    #    gio 走 GIO 自身实现，不依赖 KIO。
+    cands.append((["gio", "open", target], "gio open"))
+    cands.append((["xdg-open", target], "xdg-open"))
+    cands.append((["kde-open5", target], "kde-open5"))
+    cands.append((["kde-open", target], "kde-open"))
+    # 4) 直接起 dolphin：绕过 xdg-open / KIO 转发这条链
+    #    注意 dolphin 对不存在的路径也能以 0 退出（只是什么都没开），
+    #    所以调用前必须先确认路径存在（接口层已拦，这里兜底）。
+    cands.append((["dolphin", target], "dolphin"))
+
+    errors = []
+    for cmd, label in cands:
+        if not shutil.which(cmd[0]):
+            continue
+        ok, err = _reveal_attempt(cmd)
+        if ok:
+            log("已在文件管理器中打开（%s）：%s" % (label, target))
+            return True, ""
+        errors.append(err)
+        log("打开失败（%s）：%s" % (label, err))
+
+    if not errors:
+        return False, "系统里找不到可用的文件管理器（dolphin / gio / xdg-open 都没有）"
+    # 只回最后一条，太长前端放不下
+    return False, errors[-1]
+
+
 GALLERY = Gallery()
 
 
@@ -1386,6 +1545,33 @@ class Handler(BaseHTTPRequestHandler):
                                "W": img.width, "H": img.height,
                                "count": len(GALLERY.pages)})
 
+        if p == "/api/merge-pages":
+            # 两页合一：第一页 task + 第二页 task 排到一张 A4 上入库
+            ta = TASKS.get(b.get("a") or "")
+            tb = TASKS.get(b.get("b") or "")
+            if ta is None or tb is None or ta.image is None or tb.image is None:
+                return self._json({"error": "缺第一页或第二页图像"}, 400)
+            if not HAS_PIL:
+                return self._json({"error": "本机缺少 Pillow，无法合成"}, 400)
+            layout = b.get("layout") or "h"
+            if layout not in ("h", "v"):
+                layout = "h"
+            rotate = b.get("rotate") or "cw"
+            if rotate not in ("cw", "ccw"):
+                rotate = "cw"
+            dpi = max(_task_dpi(ta), _task_dpi(tb))
+            try:
+                img = compose_two_pages(ta.image, tb.image, layout,
+                                        rotate=rotate, dpi=dpi)
+            except Exception as e:                      # noqa: BLE001
+                log("两页合成失败:", e)
+                return self._json({"error": "合成失败：%s" % e}, 500)
+            i = GALLERY.add_image(img, dpi=dpi)
+            return self._json({"ok": True, "index": i,
+                               "W": img.width, "H": img.height,
+                               "layout": layout, "rotate": rotate,
+                               "count": len(GALLERY.pages)})
+
         if p == "/api/save":
             fmt = (b.get("format") or "png").lower()
             if fmt == "pdf":
@@ -1432,20 +1618,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if p == "/api/reveal":
             path = b.get("path") or OUTDIR
+            path = os.path.abspath(os.path.expanduser(path))
+            if not os.path.exists(path):
+                return self._json({"error": "路径不存在：%s" % path}, 404)
             target = os.path.dirname(path) if os.path.isfile(path) else path
-            for cmd in (["xdg-open", target],
-                        ["dbus-send", "--session",
-                         "--dest=org.freedesktop.FileManager1",
-                         "--type=method_call", "/org/freedesktop/FileManager1",
-                         "org.freedesktop.FileManager1.ShowItems",
-                         "array:string:file://" + path, "string:"]):
-                try:
-                    subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
-                                     stderr=subprocess.DEVNULL)
-                    return self._json({"ok": True})
-                except Exception:                   # noqa: BLE001
-                    continue
-            return self._json({"error": "无法打开文件管理器"}, 500)
+            ok, err = reveal_path(path, target)
+            if ok:
+                return self._json({"ok": True, "path": target})
+            return self._json({"error": err or "无法打开文件管理器"}, 500)
 
         if p == "/api/quit":
             self._json({"ok": True})

@@ -7,7 +7,22 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 PKGPOOL="$(cd "$(dirname "$HERE")" && pwd)/packages"   # 产物汇总处（唯一出包位置）
 PKG=canon-scanner-native
 VER=1.0-6
-ARCH=loong64
+# 架构名：loong64（Debian/Loongnix）与 loongarch64（AOSC）指向同一套
+# LoongArch 二进制，差别只在控制字段。默认出 Architecture: all 的单包，
+# 两个系统都能装；要架构专包就 ARCH=loong64 覆盖。
+ARCH="${ARCH:-all}"
+# 依赖包名随发行版不同时可覆盖，例如 AOSC：
+#   DEPS="glibc, libusb, sane-backends" bash make-deb.sh
+DEPS="${DEPS:-libc6 (>= 2.34), libusb-1.0-0, libsane1, sane-utils}"
+
+# 维护者署名：自动取当前 git 仓库身份（user.name / user.email），即你的
+# GitHub 身份，保证打包元数据与提交作者一致；取不到用默认值，可覆盖。
+GIT_NAME="$(git -C "$HERE" config user.name 2>/dev/null || true)"
+GIT_MAIL="$(git -C "$HERE" config user.email 2>/dev/null || true)"
+MAINT_NAME="${MAINT_NAME:-${GIT_NAME:-sendlan}}"
+MAINT_MAIL="${MAINT_MAIL:-${GIT_MAIL:-sendlan@outlook.com}}"
+MAINTAINER="${MAINTAINER:-$MAINT_NAME <$MAINT_MAIL>}"
+
 STAGE="$HERE/stage"
 OUT="$PKGPOOL"        # 直接出到仓库 packages/，不再另开 dist/ 副本
 MODELS="$HERE/data/canon-mfp2-models.conf"
@@ -79,14 +94,14 @@ install -m 0644 "$MODELS"    "$STAGE/usr/share/canon-scanner-native/canon-mfp2-m
 #     canon-scan-gui（会转启 canon-studio）保留为命令行入口。
 install -m 0644 "$HERE/data/README.zh-CN.md"        "$STAGE/usr/share/doc/$PKG/README.md"
 
-cat > "$STAGE/usr/share/doc/$PKG/copyright" <<'EOF'
+cat > "$STAGE/usr/share/doc/$PKG/copyright" <<EOF
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: canon-scanner-native
 Source: 自研，无上游代码仓库
 
 Files: /usr/bin/canon-scan-fix /usr/bin/canon-scan /usr/bin/canon-scan-gui
        /usr/bin/canon-net-discover
-Copyright: 2026 atree
+Copyright: 2026 $MAINT_NAME
 License: GPL-2.0-or-later
  本包全部为独立实现，不含任何厂商源代码或二进制。网络扫描的 IVEC/CHMP
  报文格式、命令码、OID 与 URL 属互操作所必需的接口事实，本包仅据此自行
@@ -98,7 +113,7 @@ License: GPL-2.0-or-later
 
 Files: /usr/share/canon-scanner-native/canon-mfp2-models.conf
        /usr/lib/udev/rules.d/80-canon-scanner.rules
-Copyright: 2026 atree
+Copyright: 2026 $MAINT_NAME
 License: GPL-2.0-or-later
  机型表由本项目独立编写（按 USB 产品 ID 升序重排），内容为 USB 产品 ID、
  能力位与机型名这三类接口事实；机型名本身是佳能注册商标，仅用于标识
@@ -111,11 +126,11 @@ cat > "$STAGE/DEBIAN/control" <<EOF
 Package: $PKG
 Version: $VER
 Architecture: $ARCH
-Maintainer: atree <local>
+Maintainer: $MAINTAINER
 Installed-Size: $INSTALLED_SIZE
 Section: graphics
 Priority: optional
-Depends: libc6 (>= 2.34), libusb-1.0-0, libsane1, sane-utils
+Depends: $DEPS
 Recommends: xsane | simple-scan
 Conflicts: scangearmp2
 Replaces: scangearmp2
@@ -126,6 +141,27 @@ Description: Canon PIXMA/MAXIFY 一体机的 loong64 原生扫描驱动入口
  并探明 CHMP 扫描通道 /canon/ij/command2/port3，无外部库依赖。
  包内不含任何非 LoongArch 的 ELF 文件。本机实测机型：G3010 (04a9:183b)。
 EOF
+
+# 架构自检：Architecture 默认 all，为的是一份 deb 同时兼容
+#   loong64（Debian/Loongnix）与 loongarch64（AOSC）两个名字。
+# 但 all 会让 dpkg 在 x86/arm 上也允许安装 —— 这里在解包前拒绝非 LoongArch。
+cat > "$STAGE/DEBIAN/preinst" <<'PI'
+#!/bin/sh
+set -e
+MACH="$(uname -m 2>/dev/null || echo unknown)"
+# 不同发行版/内核的 uname -m 可能返回 loongarch64，也可能返回 loong64，
+# 二者是同一套 LoongArch 64 位（lp64d）ABI，都必须放行。
+case "$MACH" in
+    loongarch64|loongarch64-*|loong64|loong64-*) ;;
+    *)
+        echo "canon-scanner-native: 本包只适用于 LoongArch 64 位（loong64 / loongarch64）。" >&2
+        echo "canon-scanner-native: 当前机器架构为 '$MACH'，已拒绝安装，未做任何改动。" >&2
+        exit 1
+        ;;
+esac
+exit 0
+PI
+chmod 755 "$STAGE/DEBIAN/preinst"
 
 cat > "$STAGE/DEBIAN/conffiles" <<'EOF'
 EOF

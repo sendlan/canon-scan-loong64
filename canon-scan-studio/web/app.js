@@ -13,6 +13,18 @@ const api = async (path, body) => {
   try { return JSON.parse(t); } catch { return { error: t || ('HTTP ' + r.status) }; }
 };
 
+/* 在文件管理器中打开：失败时显示后端给的真实原因（KIO 报错等），
+   不要像以前那样静默，让用户以为已经打开了。 */
+async function reveal(path) {
+  const r = await api('/api/reveal', path ? { path } : {});
+  if (r.error) {
+    toast('err', '无法打开文件管理器<br><span style="font-size:11px;opacity:.8">'
+      + r.error + '</span>', 10000);
+    return false;
+  }
+  return true;
+}
+
 const S = {
   info: null, devices: [], dev: null, caps: {}, capsOpts: {},
   opts: {},                 // 当前参数：resolution / mode / source / gamma …
@@ -23,9 +35,13 @@ const S = {
   previewSeq: -1, previewAt: 0, pendingSeq: null, previewTimer: null,
   mmW: 216.069, mmH: 297.011, _warm: false,
   netFixed: false,          // 网络设备：出图参数由设备侧固定，界面锁死
-  idMode: false,            // 身份证模式：两扫合成一页 A4
+  scanMode: 'page',         // page=整页 / id=身份证 / 2up=两页合一
   idStep: 0,                // 0=初始 1=正面已扫待翻面 2=正在扫反面
   idFront: null, idBack: null,
+  upStep: 0,                // 两页合一：0=初始 1=第一页已扫待换页 2=正在扫第二页
+  upFirst: null, upSecond: null,
+  upLayout: 'h',            // 两页合一排布：h=横向(两页转横、上下叠，默认) / v=纵向(两页竖、左右并排)
+  upRot: 'cw',              // 横向时的旋转方向：cw=顺时针(默认) / ccw=逆时针
 };
 
 function toast(kind, html, ms = 4200) {
@@ -350,8 +366,12 @@ function buildOpts() {
 async function startScan(kind = 'scan') {
   if (S.scanning) return;
   if (!S.dev) { toast('err', '没有可用的扫描仪'); return; }
-  if (S.idMode && S.idStep === 1) {
+  if (S.scanMode === 'id' && S.idStep === 1) {
     toast('warn', '等待翻面：请把身份证反面朝下放回同一位置并盖好盖子');
+    return;
+  }
+  if (S.scanMode === '2up' && S.upStep === 1) {
+    toast('warn', '等待换页：请放上第二页后点「已放好，继续」');
     return;
   }
 
@@ -585,7 +605,7 @@ async function loadFinal(task, ev) {
     + (ev.retried ? '（已自动恢复）' : ''));
 
   // 身份证模式第一面（正面）：不加入画廊，提示翻面
-  if (S.idMode && S.idStep === 0) {
+  if (S.scanMode === 'id' && S.idStep === 0) {
     if (!(await checkCard(task))) {
       S.idFront = null; S.idStep = 0;
       discardScan('稿件台上未检测到身份证或卡片', task);
@@ -599,7 +619,7 @@ async function loadFinal(task, ev) {
     return;
   }
   // 身份证模式第二面（反面）：合成一页入库
-  if (S.idMode && S.idStep === 2) {
+  if (S.scanMode === 'id' && S.idStep === 2) {
     if (!(await checkCard(task))) {
       S.idBack = null; S.idStep = 2;
       discardScan('反面未检测到身份证或卡片', task);
@@ -608,6 +628,21 @@ async function loadFinal(task, ev) {
     }
     S.idBack = task;
     mergeIdPages();
+    return;
+  }
+
+  // 两页合一第一页：不加入画廊，提示换第二页
+  if (S.scanMode === '2up' && S.upStep === 0) {
+    S.upFirst = task;
+    S.upStep = 1;
+    resetButtons();
+    promptNextPage();
+    return;
+  }
+  // 两页合一第二页：合成一张 A4 入库
+  if (S.scanMode === '2up' && S.upStep === 2) {
+    S.upSecond = task;
+    mergeTwoPages();
     return;
   }
 
@@ -623,6 +658,52 @@ async function loadFinal(task, ev) {
 
 function resetIdFlow() {
   S.idStep = 0; S.idFront = null; S.idBack = null;
+}
+
+function resetUpFlow() {
+  S.upStep = 0; S.upFirst = null; S.upSecond = null;
+}
+
+function promptNextPage() {
+  dialog({
+    title: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="8" rx="1.5"/><rect x="4" y="13" width="16" height="8" rx="1.5"/></svg>已扫描第一页',
+    body: `<b>请取出第一页，放上第二页</b>（与第一页同方向、尽量放在同一位置），盖好盖子。<br>
+      <span style="font-size:11px;opacity:.75">放好后点「已放好，继续」扫第二页；点「放弃」则丢弃这次两页合一，画廊不变。</span>`,
+    acts: [
+      { label: '放弃', onClick: () => { resetUpFlow(); setStatus('', '已放弃两页合一'); } },
+      { label: '已放好，继续', pri: true, onClick: () => { S.upStep = 2; startScan('scan'); } },
+    ],
+  });
+}
+
+async function mergeTwoPages() {
+  const layout = S.upLayout;
+  const rotate = S.upRot;
+  const r = await api('/api/merge-pages',
+    { a: S.upFirst, b: S.upSecond, layout, rotate });
+  const t1 = S.upFirst, t2 = S.upSecond;
+  resetUpFlow();
+  if (r.error || r.index == null) {
+    toast('err', r.error || '合成失败');
+    setStatus('err', '两页合成失败');
+    resetButtons();
+    return;
+  }
+  // 两页原图没进画廊，合成后即从后端释放，免得白占内存
+  if (t1) api('/api/drop-task', { task: t1 });
+  if (t2) api('/api/drop-task', { task: t2 });
+  const page = { index: r.index, w: r.W, h: r.H };
+  S.pages.push(page);
+  S.cur = S.pages.length - 1;
+  renderTabs();
+  selectPage(S.cur);
+  resetButtons();
+  toast('ok', `两页已合成一张 A4：<b>${r.W} × ${r.H}</b>`
+    + `<br><span style="font-size:11px;opacity:.75">`
+    + (layout === 'h'
+        ? `横向（两页转横、A 上 B 下、${rotate === 'cw' ? '顺时针' : '逆时针'}）`
+        : `纵向（两页竖向、A 左 B 右）`)
+    + ` · A4 竖放</span>`, 8000);
 }
 
 function promptFlip() {
@@ -660,6 +741,7 @@ async function mergeIdPages() {
 function finishFail(msg, hint) {
   S.scanning = false;
   resetIdFlow();
+  resetUpFlow();
   setStatus('err', '扫描失败');
   setTag('err', '设备通道异常');
   setProgress(null, false);
@@ -784,7 +866,7 @@ async function doSave() {
       body: `已把 <b>${S.pages.length}</b> 页合并为 PDF：<br>
         <span style="font-family:'Noto Sans Mono',monospace;font-size:11px">${r.path}</span>`,
       acts: [
-        { label: '在文件管理器中打开', onClick: () => api('/api/reveal', { path: r.path }) },
+        { label: '在文件管理器中打开', onClick: () => reveal(r.path) },
         { label: '好', pri: true },
       ],
     });
@@ -798,7 +880,7 @@ async function doSave() {
       title: '保存完成',
       body: `<span style="font-family:'Noto Sans Mono',monospace;font-size:11px">${r.path}</span>`,
       acts: [
-        { label: '在文件管理器中打开', onClick: () => api('/api/reveal', { path: r.path }) },
+        { label: '在文件管理器中打开', onClick: () => reveal(r.path) },
         { label: '好', pri: true },
       ],
     });
@@ -961,7 +1043,8 @@ async function doRescan() {
 
 function bind() {
   $('#btnScan').onclick = () => {
-    if (S.idMode && S.idStep === 1) { S.idStep = 2; startScan('scan'); return; }
+    if (S.scanMode === 'id' && S.idStep === 1) { S.idStep = 2; startScan('scan'); return; }
+    if (S.scanMode === '2up' && S.upStep === 1) { S.upStep = 2; startScan('scan'); return; }
     startScan('scan');
   };
   $('#btnPreview').onclick = () => startScan('preview');
@@ -983,25 +1066,74 @@ function bind() {
     layoutPaper();
   };
 
-  /* 身份证 / 整页 扫描模式（与设备参数无关，一次构建） */
+  /* 整页 / 身份证 / 两页合一 扫描模式（与设备参数无关，一次构建） */
   {
-    const kinds = [['page', '整页'], ['id', '身份证']];
+    const kinds = [['page', '整页'], ['id', '身份证'], ['2up', '两页合一']];
     const seg = $('#segKind');
     const draw = () => {
-      seg.className = 'seg c2';
+      seg.className = 'seg c3';
       seg.innerHTML = '';
       kinds.forEach(([v, txt]) => {
         const b = document.createElement('b');
         b.textContent = txt;
         b.dataset.v = v;
-        b.classList.toggle('on', (v === 'id') === !!S.idMode);
-        b.onclick = () => { S.idMode = v === 'id'; resetIdFlow(); draw(); };
+        b.title = v === 'page' ? '普通整页扫描'
+          : v === 'id' ? '身份证正反面合成一页 A4'
+          : '两页各扫一次，合成一张 A4';
+        b.classList.toggle('on', v === S.scanMode);
+        b.onclick = () => {
+          S.scanMode = v; resetIdFlow(); resetUpFlow(); draw();
+          setStatus('', v === 'page' ? '已切换到整页扫描'
+            : v === 'id' ? '已切换到身份证模式（两扫一页）'
+            : '已切换到两页合一（两扫一页）');
+        };
         seg.appendChild(b);
       });
-      $('#idTip').hidden = !S.idMode;
-      $('#modeNote').textContent = S.idMode ? '两扫一页 · A4' : '';
+      $('#idTip').hidden = S.scanMode !== 'id';
+      $('#upTip').hidden = S.scanMode !== '2up';
+      $('#upLayoutBox').hidden = S.scanMode !== '2up';
+      $('#modeNote').textContent = S.scanMode === 'id' ? '两扫一页 · A4'
+        : S.scanMode === '2up' ? '两扫一页 · A4' : '';
     };
     draw();
+  }
+
+  /* 两页合一：排布方向（横向/纵向）+ 横向时的旋转方向（顺时针/逆时针） */
+  {
+    const segL = $('#segUpLayout');
+    const segR = $('#segUpRot');
+    const layouts = [['h', '横向'], ['v', '纵向']];
+    const rots = [['cw', '顺时针'], ['ccw', '逆时针']];
+    const drawRot = () => {
+      segR.innerHTML = '';
+      rots.forEach(([v, txt]) => {
+        const b = document.createElement('b');
+        b.textContent = txt;
+        b.dataset.v = v;
+        b.title = v === 'cw' ? '原稿顺时针转 90°（顶边落到成品右边）'
+          : '原稿逆时针转 90°（顶边落到成品左边）';
+        b.classList.toggle('on', v === S.upRot);
+        b.onclick = () => { S.upRot = v; drawRot(); };
+        segR.appendChild(b);
+      });
+      // 只有横向才转 90°，纵向时这一行没意义，藏起来
+      segR.style.display = S.upLayout === 'h' ? '' : 'none';
+    };
+    const drawL = () => {
+      segL.innerHTML = '';
+      layouts.forEach(([v, txt]) => {
+        const b = document.createElement('b');
+        b.textContent = txt;
+        b.dataset.v = v;
+        b.title = v === 'h' ? '两页各自转横、上下叠放（默认，铺满 A4）'
+          : '两页保持竖向、左右并排';
+        b.classList.toggle('on', v === S.upLayout);
+        b.onclick = () => { S.upLayout = v; drawL(); drawRot(); };
+        segL.appendChild(b);
+      });
+    };
+    drawL();
+    drawRot();
   }
 
   $('#fmtSel').onchange = () => {
@@ -1012,7 +1144,7 @@ function bind() {
   };
   $('#dirTxt').parentElement.onclick = async e => {
     if (e.target.tagName === 'SELECT') return;
-    await api('/api/reveal', {});
+    await reveal();
   };
 
   $('#gamma').oninput = () => { $('#gammaVal').textContent = $('#gamma').value; };
