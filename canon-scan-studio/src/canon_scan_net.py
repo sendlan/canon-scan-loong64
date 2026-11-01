@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """canon_scan_net.py —— PIXMA/MAXIFY 一体机的网络扫描实现（纯标准库）。
-命令体逐字节对齐原厂 x86-64 驱动真机抓包。
+命令体对齐原厂驱动。
 
 通道：HTTP/CHMP，POST /canon/ij/command2/port3（port3=扫描服务），
 每条命令 = POST（命令体，回 200 空 ack）+ GET（回 chunked 正文）。
@@ -26,7 +26,7 @@ CHMP_PORT = 80
 CHMP_VERSION = "1.0.0"
 CHMP_TIMEOUT = 20
 
-# ---- 命令体（全部取自真机抓包，逐字节一致）--------------------------------
+# ---- 命令体（对齐原厂，逐字节一致）----------------------------------------
 _IVEC_HEAD = ('<?xml version="1.0" encoding="utf-8" ?><cmd '
               'xmlns:ivec="http://www.canon.com/ns/cmd/2008/07/common/">')
 _IVEC_HEAD_VCN = ('<?xml version="1.0" encoding="utf-8" ?><cmd '

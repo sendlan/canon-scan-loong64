@@ -26,7 +26,7 @@ import subprocess
 import sys
 import time
 
-# Canon 私有 OID（IANA 企业号 1602），取自原厂驱动真机抓包
+# Canon 私有 OID（IANA 企业号 1602）
 OID_MAC = "1.3.6.1.4.1.1602.1.3.1.13.0"     # 6 字节二进制
 OID_SERIAL = "1.3.6.1.4.1.1602.1.2.1.8.1.3.1.1"  # ASCII
 OID_MODEL = "1.3.6.1.4.1.1602.1.1.1.1.0"    # ASCII

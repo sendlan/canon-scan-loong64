@@ -2,8 +2,8 @@
 
 ![Scan window](assets/screenshot.png)
 
-Native USB and network scanning for Canon PIXMA / MAXIFY multifunction printers on
-LoongArch (loong64). No x86-64 binaries, no instruction translation layer (LATX/qemu).
+Native USB and network scanning for Canon PIXMA / MAXIFY multifunction printers
+on LoongArch (loong64).
 
 ## What's inside
 
@@ -26,4 +26,4 @@ sudo apt install ../packages/canon-*.deb
 The full user manual lives in each package's `data/README.zh-CN.md`; the network
 scan protocol is documented in the header of `canon-scan-studio/src/canon_scan_net.py`.
 
-License: GPL-2.0-or-later, all code is an independent implementation.
+License: GPL-2.0-or-later.

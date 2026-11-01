@@ -76,21 +76,25 @@ body.light .glow{opacity:.45}
 .app{position:relative;height:100%;display:flex;flex-direction:column;z-index:1}
 
 /* ====================== 顶栏 ====================== */
+/* 窗口装饰（标题栏）已经带了应用图标，应用内不再叠同一个 logo：
+   顶栏做成更薄的一行工具条，品牌只剩渐变淡字，空间让给设备选择与操作 */
 .topbar{
-  height:58px;flex:none;display:flex;align-items:center;gap:12px;padding:0 14px 0 16px;
+  height:52px;flex:none;display:flex;align-items:center;gap:13px;padding:0 14px 0 18px;
   background:linear-gradient(180deg,var(--panel),transparent);
   border-bottom:1px solid var(--bd);backdrop-filter:blur(20px);z-index:5;
 }
-.logo{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;flex:none;
-  background:linear-gradient(140deg,#9c8dff,#5b7cfa 48%,#35d6d6);
-  box-shadow:0 5px 16px rgba(124,108,255,.45),inset 0 1px 0 rgba(255,255,255,.45)}
-.brand b{font-size:14px;font-weight:700;display:block;line-height:1.25}
-.brand s{font-size:9px;letter-spacing:2.2px;color:var(--dim2);font-weight:700;
-  text-decoration:none;display:block}
+.topbar::before{content:"";width:3.5px;height:19px;border-radius:2px;flex:none;
+  background:linear-gradient(180deg,var(--accent-lt),var(--cyan));opacity:.9;
+  box-shadow:0 0 12px rgba(124,108,255,.55)}
+.brand{display:flex;align-items:baseline;gap:9px;line-height:1.25;min-width:0}
+.brand b{font-size:17.5px;font-weight:800;letter-spacing:.3px;color:var(--text)}
+.brand s{font-size:9.5px;letter-spacing:3.4px;color:var(--dim2);font-weight:700;
+  text-decoration:none;padding-left:9px;border-left:1px solid var(--bd2);
+  transform:translateY(-1px);pointer-events:none}
 .spacer{flex:1}
 
-.dev{position:relative;display:flex;align-items:center;gap:9px;padding:6px 11px 6px 11px;
-  border-radius:19px;background:var(--card);border:1px solid var(--bd);max-width:340px;
+.dev{position:relative;display:flex;align-items:center;gap:9px;padding:5px 11px 5px 11px;
+  border-radius:17px;background:var(--card);border:1px solid var(--bd);max-width:400px;
   cursor:pointer;transition:background .15s,border-color .15s}
 .dev:hover{background:var(--card-hi);border-color:var(--bd2)}
 /* 原生 select 覆盖整个设备框：点击任意位置都能打开下拉 */
@@ -105,9 +109,9 @@ body.light .glow{opacity:.45}
 .dev.netdev .m::after{content:" · 网络";font-size:10px;font-weight:500;color:var(--dim2)}
 .dev .txt{min-width:0}
 .dev .m{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis;max-width:236px}
+  text-overflow:ellipsis;max-width:300px}
 .dev .p{font-size:9.5px;color:var(--dim2);font-family:"Noto Sans Mono",monospace;
-  letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:236px}
+  letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px}
 .dev svg{color:var(--dim2);flex:none}
 
 .ico{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;

@@ -45,8 +45,7 @@
 #define MAX_DEV   64
 #define MAX_CANDS 1024
 
-/* Canon 私有 MIB：IANA 企业号 1602。这些是接口事实（OID 编号本身），不是
- * 任何一家的表达。community 取自原厂抓包。 */
+/* Canon 私有 MIB：IANA 企业号 1602。community 对齐原厂驱动。 */
 #define SNMP_COMMUNITY "canon_admin"
 #define OID_MODEL    "1.3.6.1.4.1.1602.1.1.1.1.0"     /* ASCII 机型名 */
 #define OID_SERIAL   "1.3.6.1.4.1.1602.1.2.1.8.1.3.1.1" /* ASCII 序列号 */

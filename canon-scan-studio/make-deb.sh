@@ -4,13 +4,17 @@ set -eu
 
 PKG=canon-scan-studio
 VER=1.0
-REV=12
+REV=14
 # 纯 Python + 资源，没有任何 ELF —— Architecture: all 本来就是正确取值，
 # 且 dpkg 在 loong64 / loongarch64 上都接受。要架构专包就 ARCH=loong64 覆盖。
 ARCH="${ARCH:-all}"
 # 依赖包名随发行版不同时可覆盖，例如 AOSC：
-#   DEPS="python3, sane-backends, python-pillow, gtk3, webkitgtk" bash make-deb.sh
-DEPS="${DEPS:-python3 (>= 3.9), sane-utils, libsane1}"
+#   DEPS="python-3, sane-backends" bash make-deb.sh
+# 默认值一律写成 OR 依赖，让一份 deb 同时满足 Debian/Loongnix 与 AOSC：
+#   - AOSC 只有未拆分的 sane-backends（同时提供 libsane.so.1 与 scanimage），
+#     没有 sane-utils / libsane1 这两个包名；
+#   - AOSC 的 Python 主包名为 python-3，不是 python3。
+DEPS="${DEPS:-python3 (>= 3.9) | python-3, libsane1 | sane-backends, sane-utils | sane-backends}"
 
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -79,7 +83,7 @@ Architecture: $ARCH
 Maintainer: $MAINTAINER
 Installed-Size: $SIZE
 Depends: $DEPS
-Recommends: python3-pil, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, canon-scanner-native
+Recommends: python3-pil | pillow, gir1.2-gtk-3.0, gir1.2-webkit2-4.1, canon-scanner-native
 Section: graphics
 Priority: optional
 Description: Canon 扫描 —— PIXMA 一体机的原生扫描界面
@@ -170,7 +174,7 @@ import importlib.util, sys
 spec = importlib.util.spec_from_file_location('csn', sys.argv[1])
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
-# 期望值 = 原厂 x86-64 扫描驱动在同机同设备上真实抓包里的命令体长度
+# 期望值 = 原厂驱动真机抓包里的命令体长度
 EXPECT = {'CMD_START_JOB': 288, 'CMD_MODE_SHIFT': 390, 'CMD_END_JOB': 262,
           'CMD_DB20': 16, 'CMD_F320': 16, 'CMD_D820': 72, 'CMD_D920': 16,
           'CMD_DA20': 16, 'CMD_DC20': 16, 'CMD_D420': 16, 'CMD_EF20': 16}

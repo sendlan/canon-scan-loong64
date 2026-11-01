@@ -2,7 +2,7 @@
 
 ![扫描界面](assets/screenshot.png)
 
-USB 与网络双通道扫描，全 LoongArch 原生，不含 x86-64 闭源件、无需 LATX 翻译。
+USB 与网络双通道扫描，LoongArch 原生（loong64）。
 
 ## 组成
 
@@ -25,4 +25,4 @@ sudo apt install ../packages/canon-*.deb
 每包 `data/README.zh-CN.md` 为完整手册；网络扫描协议见
 `canon-scan-studio/src/canon_scan_net.py` 头注。
 
-许可：GPL-2.0-or-later，全部独立实现。
+许可：GPL-2.0-or-later。

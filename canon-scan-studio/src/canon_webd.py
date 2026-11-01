@@ -749,7 +749,7 @@ class NetScanTask:
     固定参数（CMD_D820）。对上层暴露与 ScanTask 相同的接口（q/done/image/thumb）。
     """
 
-    # 进度条估算基准：A4 / 300dpi / 彩色 真机实测约 147 KB（设备不预告总长）
+    # 进度条估算基准：A4 / 300dpi / 彩色 约 147 KB（设备不预告总长）
     NET_EST_BYTES = 150000
 
     def __init__(self, dev, opts, kind="scan"):

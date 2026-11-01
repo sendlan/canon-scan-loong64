@@ -6,14 +6,18 @@ export LC_ALL=C
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PKGPOOL="$(cd "$(dirname "$HERE")" && pwd)/packages"   # 产物汇总处（唯一出包位置）
 PKG=canon-scanner-native
-VER=1.0-6
+VER=1.0-8
 # 架构名：loong64（Debian/Loongnix）与 loongarch64（AOSC）指向同一套
 # LoongArch 二进制，差别只在控制字段。默认出 Architecture: all 的单包，
 # 两个系统都能装；要架构专包就 ARCH=loong64 覆盖。
 ARCH="${ARCH:-all}"
 # 依赖包名随发行版不同时可覆盖，例如 AOSC：
 #   DEPS="glibc, libusb, sane-backends" bash make-deb.sh
-DEPS="${DEPS:-libc6 (>= 2.34), libusb-1.0-0, libsane1, sane-utils}"
+# 默认值一律写成 OR 依赖，让一份 deb 同时满足 Debian/Loongnix 与 AOSC：
+#   - AOSC 没有 sane-utils / libsane1，只有未拆分的 sane-backends
+#     （libsane.so.1 + pixma 后端 + scanimage 都在里面）；
+#   - AOSC 的 C 库包名为 glibc，libusb 包名为 libusb。
+DEPS="${DEPS:-libc6 (>= 2.34) | glibc, libusb-1.0-0 | libusb, libsane1 | sane-backends, sane-utils | sane-backends}"
 
 # 维护者署名：自动取当前 git 仓库身份（user.name / user.email），即你的
 # GitHub 身份，保证打包元数据与提交作者一致；取不到用默认值，可覆盖。
@@ -142,9 +146,8 @@ Description: Canon PIXMA/MAXIFY 一体机的 loong64 原生扫描驱动入口
  包内不含任何非 LoongArch 的 ELF 文件。本机实测机型：G3010 (04a9:183b)。
 EOF
 
-# 架构自检：Architecture 默认 all，为的是一份 deb 同时兼容
-#   loong64（Debian/Loongnix）与 loongarch64（AOSC）两个名字。
-# 但 all 会让 dpkg 在 x86/arm 上也允许安装 —— 这里在解包前拒绝非 LoongArch。
+# 架构自检：Architecture: all 让一份 deb 同时兼容 loong64（Debian/Loongnix）
+# 与 loongarch64（AOSC）两个名字，但任何机器都可解包 —— 这里在解包前校验目标架构。
 cat > "$STAGE/DEBIAN/preinst" <<'PI'
 #!/bin/sh
 set -e

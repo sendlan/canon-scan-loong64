@@ -19,6 +19,19 @@ gi.require_version("WebKit2", "4.1")
 from gi.repository import Gtk, WebKit2, Gdk, GLib   # noqa: E402
 
 
+# X11 的 WM_CLASS / Wayland 的 app_id 统一为 "canon-studio"，
+# 与 .desktop 的 Icon=canon-studio 对齐，窗口和任务栏才能拿到图标。
+# Wayland 下 GTK3 不支持 xdg_toplevel_icon 协议，KWin 取图标走 app_id →
+# .desktop 查表，而 GTK3 Wayland 的 app_id 来源是 g_get_prgname()（不是
+# program class —— 那是 X11 WM_CLASS 的来源），所以两个都要设置。
+GLib.set_prgname("canon-studio")
+import ctypes                                  # noqa: E402
+try:
+    ctypes.CDLL("libgdk-3.so.0").gdk_set_program_class(b"canon-studio")
+except OSError:                                # noqa: S110
+    pass
+
+
 def app_cache_dir():
     base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
     d = os.path.join(base, "canon-studio", "webkit")
