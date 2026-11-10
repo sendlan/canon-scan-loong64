@@ -6,7 +6,7 @@ export LC_ALL=C
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PKGPOOL="$(cd "$(dirname "$HERE")" && pwd)/packages"   # 产物汇总处（唯一出包位置）
 PKG=canon-scanner-native
-VER=1.0-8
+VER=1.0-9
 # 架构名：loong64（Debian/Loongnix）与 loongarch64（AOSC）指向同一套
 # LoongArch 二进制，差别只在控制字段。默认出 Architecture: all 的单包，
 # 两个系统都能装；要架构专包就 ARCH=loong64 覆盖。
@@ -30,6 +30,7 @@ MAINTAINER="${MAINTAINER:-$MAINT_NAME <$MAINT_MAIL>}"
 STAGE="$HERE/stage"
 OUT="$PKGPOOL"        # 直接出到仓库 packages/，不再另开 dist/ 副本
 MODELS="$HERE/data/canon-mfp2-models.conf"
+LICENSE="$(cd "$HERE/.." && pwd)/LICENSE"   # GPL-2.0 全文，随包分发
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE"/DEBIAN \
@@ -97,31 +98,37 @@ install -m 0644 "$MODELS"    "$STAGE/usr/share/canon-scanner-native/canon-mfp2-m
 #     canon-scan-studio 包提供（Exec=canon-studio）。canon-scan（CLI）与
 #     canon-scan-gui（会转启 canon-studio）保留为命令行入口。
 install -m 0644 "$HERE/data/README.zh-CN.md"        "$STAGE/usr/share/doc/$PKG/README.md"
+# GPL 全文随包分发：AOSC 等发行版没有 /usr/share/common-licenses/GPL-2
+install -m 0644 "$LICENSE" "$STAGE/usr/share/doc/$PKG/LICENSE.GPL-2"
 
 cat > "$STAGE/usr/share/doc/$PKG/copyright" <<EOF
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: canon-scanner-native
-Source: 自研，无上游代码仓库
+Source: 本项目自研，不含任何上游代码仓库的代码或二进制
 
 Files: /usr/bin/canon-scan-fix /usr/bin/canon-scan /usr/bin/canon-scan-gui
        /usr/bin/canon-net-discover
 Copyright: 2026 $MAINT_NAME
 License: GPL-2.0-or-later
  本包全部为独立实现，不含任何厂商源代码或二进制。网络扫描的 IVEC/CHMP
- 报文格式、命令码、OID 与 URL 属互操作所必需的接口事实，本包仅据此自行
- 实现，未复制他方代码；扫描服务地址取自佳能开源前端头文件
- include/libcnnet3_url.h 公布的 CNNET3_URL_SCAN。
+ 报文格式、命令码与 OID 属互操作所必需的接口事实，通过观察设备报文
+ 得到并自行实现，未复制他方代码；扫描服务地址取自佳能官方源码包
+ (scangearmp2 4.91-1) 的 GPLv2 头文件 include/libcnnet3_url.h 公布的
+ CNNET3_URL_SCAN 字符串常量。该文件属佳能 EULA 中的 Module III
+ (GPL v2 + 链接例外)，本包未引入其代码，也未链接或分发佳能闭源库。
  .
- On Debian systems the full text of the GPL-2 license can be found in
- /usr/share/common-licenses/GPL-2.
+ GPL-2 全文见本包 /usr/share/doc/$PKG/LICENSE.GPL-2；
+ Debian 系统上另可见 /usr/share/common-licenses/GPL-2。
+ 完整来源说明见源码仓库根目录 NOTICE.md。
 
 Files: /usr/share/canon-scanner-native/canon-mfp2-models.conf
        /usr/lib/udev/rules.d/80-canon-scanner.rules
 Copyright: 2026 $MAINT_NAME
 License: GPL-2.0-or-later
- 机型表由本项目独立编写（按 USB 产品 ID 升序重排），内容为 USB 产品 ID、
- 能力位与机型名这三类接口事实；机型名本身是佳能注册商标，仅用于标识
- 兼容的设备型号。
+ 表格格式与按 USB 产品 ID 升序的编排由本项目编写。表中 USB 产品 ID、
+ 能力位与机型名是客观接口事实，与佳能官方 scangearmp2 4.91-1 的
+ canon_mfp2.conf 逐条一致（162 条，无差异）；事实数据本身不受著作权
+ 保护。机型名是佳能注册商标，仅用于标识兼容的设备型号。
 EOF
 
 echo "== 4/6 生成 control =="

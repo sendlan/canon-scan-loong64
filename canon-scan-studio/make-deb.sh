@@ -4,7 +4,7 @@ set -eu
 
 PKG=canon-scan-studio
 VER=1.0
-REV=14
+REV=15
 # 纯 Python + 资源，没有任何 ELF —— Architecture: all 本来就是正确取值，
 # 且 dpkg 在 loong64 / loongarch64 上都接受。要架构专包就 ARCH=loong64 覆盖。
 ARCH="${ARCH:-all}"
@@ -56,22 +56,27 @@ install -m644 "$ROOT/data/canon-studio.svg" \
 
 # ---------- 文档 ----------
 [ -f "$ROOT/data/README.zh-CN.md" ] && install -m644 "$ROOT/data/README.zh-CN.md" "$DOC/README.md"
+# GPL 全文随包分发：AOSC 等发行版没有 /usr/share/common-licenses/GPL-2
+install -m644 "$(cd "$ROOT/.." && pwd)/LICENSE" "$DOC/LICENSE.GPL-2"
 
 cat > "$DOC/copyright" <<EOF
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: canon-scan-studio
-Source: 自研，无上游代码仓库
+Source: 本项目自研，不含任何上游代码仓库的代码或二进制
 
 Files: *
 Copyright: 2026 $MAINT_NAME
 License: GPL-2.0-or-later
  本套件为独立实现，不含任何厂商源代码或二进制。网络扫描的 IVEC/CHMP 命令体
- 由本项目自行实现，与原厂驱动真机抓包逐字节一致；此类命令体属互操作必需的
- 接口事实，不受著作权保护。USB 扫描经系统 SANE pixma 后端公开接口完成，
+ 由本项目自行实现，与设备实际报文一致；此类命令体属互操作必需的接口事实，
+ 不受著作权保护。扫描服务地址取自佳能官方源码包 (scangearmp2 4.91-1) 的
+ GPLv2 头文件 include/libcnnet3_url.h 公布的字符串常量，未引入其代码，
+ 也未链接或分发佳能闭源库。USB 扫描经系统 SANE pixma 后端公开接口完成，
  不链接其代码。
  .
- On Debian systems the full text of the GPL-2 license can be found in
- /usr/share/common-licenses/GPL-2.
+ GPL-2 全文见本包 /usr/share/doc/$PKG/LICENSE.GPL-2；
+ Debian 系统上另可见 /usr/share/common-licenses/GPL-2。
+ 完整来源说明见源码仓库根目录 NOTICE.md。
 EOF
 
 # ---------- control ----------
