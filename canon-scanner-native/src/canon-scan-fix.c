@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * canon-scan-fix —— Canon IVEC 扫描通道挂起恢复工具
  *

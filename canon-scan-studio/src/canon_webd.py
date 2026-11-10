@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-2.0-or-later
 """
 canon_webd —— 佳能 PIXMA 一体机 scanimage 的本地 Web 后端
 

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * canon-net-discover —— 网络上的 Canon 扫描仪主动发现
  *

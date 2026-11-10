@@ -26,4 +26,5 @@ sudo apt install ../packages/canon-*.deb
 The full user manual lives in each package's `data/README.zh-CN.md`; the network
 scan protocol is documented in the header of `canon-scan-studio/src/canon_scan_net.py`.
 
-License: GPL-2.0-or-later.
+License: GPL-2.0-or-later. The full text is in [`LICENSE`](LICENSE); file-level
+provenance (自研实现 / 接口事实来源 / 数据表) is in [`NOTICE.md`](NOTICE.md).

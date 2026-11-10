@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-2.0-or-later
 """canon_webd 的端到端自检：起扫描 → 消费 SSE → 取预览 → 保存 → 校验。"""
 
 import json

@@ -25,4 +25,5 @@ sudo apt install ../packages/canon-*.deb
 每包 `data/README.zh-CN.md` 为完整手册；网络扫描协议见
 `canon-scan-studio/src/canon_scan_net.py` 头注。
 
-许可：GPL-2.0-or-later。
+许可：GPL-2.0-or-later，全文见 [`LICENSE`](LICENSE)；各层来源说明
+（自研实现 / 接口事实 / 数据表）见 [`NOTICE.md`](NOTICE.md)。

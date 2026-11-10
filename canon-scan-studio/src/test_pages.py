@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-2.0-or-later
 """多页扫描 + PDF 导出自检：连扫两页 → 合成 PDF → 校验文件。"""
 
 import json

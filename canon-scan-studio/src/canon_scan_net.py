@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-2.0-or-later
 """canon_scan_net.py —— PIXMA/MAXIFY 一体机的网络扫描实现（纯标准库）。
 命令体对齐原厂驱动。
 

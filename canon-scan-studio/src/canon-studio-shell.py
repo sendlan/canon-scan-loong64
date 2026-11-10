@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-2.0-or-later
 """
 canon-studio 的原生窗口外壳 —— GTK3 + WebKit2 4.1（本机 loong64 原生）
 

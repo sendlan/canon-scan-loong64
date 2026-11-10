@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-2.0-or-later
 """
 canon_net —— 佳能 IJ 设备「网络主动发现」（对齐原厂 CNNET2_* 发现层：
 CreateInstance → OptSetting 超时 → Search → EnumSearchInfo）
